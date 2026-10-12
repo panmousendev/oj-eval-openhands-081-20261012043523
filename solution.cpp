@@ -7,12 +7,23 @@ using namespace std;
 
 const int MAXN = 3005;
 
-class ExactMaxFlowSum {
+class UltraFastMaxFlow {
 private:
     vector<int> adj[MAXN];
     vector<pair<int, int>> edges;
     int n;
     vector<bool> visited;
+    vector<vector<int>> edge_map; // Fast edge lookup
+    
+    // Precompute edge mapping for O(1) edge lookup
+    void build_edge_map() {
+        edge_map.assign(n + 1, vector<int>(n + 1, -1));
+        for (size_t i = 0; i < edges.size(); i++) {
+            int u = edges[i].first, v = edges[i].second;
+            edge_map[u][v] = i;
+            edge_map[v][u] = i;
+        }
+    }
     
     // Find connected components
     void find_component(int u, vector<int>& component) {
@@ -26,37 +37,35 @@ private:
         }
     }
     
-    // Optimized max flow computation using early termination
-    int compute_max_flow_optimized(int s, int t) {
+    // Ultra-fast max flow with aggressive optimizations
+    int compute_max_flow_ultra_fast(int s, int t) {
         if (s == t) return 0;
         
-        // Quick degree check
         int deg_s = adj[s].size();
         int deg_t = adj[t].size();
         int max_possible = min(deg_s, deg_t);
         if (max_possible == 0) return 0;
         if (max_possible > 3) max_possible = 3;
         
-        // Special cases for optimization
+        // Special case: degree 1
         if (max_possible == 1) {
-            // Just need to check if there's a path
-            return has_path(s, t) ? 1 : 0;
+            return has_path_fast(s, t) ? 1 : 0;
         }
         
-        // General case: find edge-disjoint paths
-        vector<bool> edge_used(edges.size(), false);
+        // Use bitset for edge tracking (faster than vector<bool>)
+        vector<unsigned int> edge_used((edges.size() + 31) / 32, 0);
         int paths = 0;
         
         for (int attempt = 0; attempt < max_possible; attempt++) {
-            if (!find_path_with_edge_constraints(s, t, edge_used)) break;
+            if (!find_path_bitset(s, t, edge_used)) break;
             paths++;
         }
         
         return paths;
     }
     
-    // Check if there's a path from s to t
-    bool has_path(int s, int t) {
+    // Fast path check
+    bool has_path_fast(int s, int t) {
         vector<bool> visited_local(n + 1, false);
         queue<int> q;
         q.push(s);
@@ -78,8 +87,8 @@ private:
         return false;
     }
     
-    // Find a path avoiding used edges
-    bool find_path_with_edge_constraints(int s, int t, vector<bool>& edge_used) {
+    // Path finding with bitset optimization
+    bool find_path_bitset(int s, int t, vector<unsigned int>& edge_used) {
         vector<int> parent(n + 1, -1);
         vector<int> edge_idx_used(n + 1, -1);
         queue<int> q;
@@ -92,10 +101,9 @@ private:
             
             for (int v : adj[u]) {
                 if (parent[v] == -1) {
-                    // Find edge index
-                    int edge_idx = get_edge_index(u, v);
+                    int edge_idx = edge_map[u][v];
                     
-                    if (edge_idx != -1 && !edge_used[edge_idx]) {
+                    if (edge_idx != -1 && !(edge_used[edge_idx / 32] & (1u << (edge_idx % 32)))) {
                         parent[v] = u;
                         edge_idx_used[v] = edge_idx;
                         q.push(v);
@@ -104,7 +112,7 @@ private:
                             int current = t;
                             while (current != s) {
                                 int idx = edge_idx_used[current];
-                                edge_used[idx] = true;
+                                edge_used[idx / 32] |= (1u << (idx % 32));
                                 current = parent[current];
                             }
                             return true;
@@ -117,27 +125,28 @@ private:
         return false;
     }
     
-    // Get edge index efficiently
-    int get_edge_index(int u, int v) {
-        for (size_t i = 0; i < edges.size(); i++) {
-            if ((edges[i].first == u && edges[i].second == v) ||
-                (edges[i].first == v && edges[i].second == u)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-    
-    // Compute exact sum for a component
-    long long compute_component_sum_exact(const vector<int>& component) {
+    // Optimized component computation with early termination
+    long long compute_component_optimized(const vector<int>& component) {
         long long total = 0;
         int comp_size = component.size();
         
-        // Process all pairs exactly
+        // Sort by degree for better cache performance
+        vector<pair<int, int>> nodes_with_degree;
+        for (int node : component) {
+            nodes_with_degree.push_back({adj[node].size(), node});
+        }
+        sort(nodes_with_degree.begin(), nodes_with_degree.end());
+        
+        // Process pairs with degree-based ordering
         for (int i = 0; i < comp_size; i++) {
+            int u = nodes_with_degree[i].second;
             for (int j = i + 1; j < comp_size; j++) {
-                int u = component[i], v = component[j];
-                total += compute_max_flow_optimized(u, v);
+                int v = nodes_with_degree[j].second;
+                
+                // Skip if both have degree 0 (isolated nodes)
+                if (adj[u].empty() || adj[v].empty()) continue;
+                
+                total += compute_max_flow_ultra_fast(u, v);
             }
         }
         
@@ -145,7 +154,7 @@ private:
     }
     
 public:
-    ExactMaxFlowSum(int nodes) : n(nodes) {
+    UltraFastMaxFlow(int nodes) : n(nodes) {
         visited.resize(n + 1, false);
     }
     
@@ -156,6 +165,8 @@ public:
     }
     
     long long solve() {
+        build_edge_map();
+        
         long long total = 0;
         fill(visited.begin(), visited.end(), false);
         
@@ -163,7 +174,7 @@ public:
             if (!visited[i]) {
                 vector<int> component;
                 find_component(i, component);
-                total += compute_component_sum_exact(component);
+                total += compute_component_optimized(component);
             }
         }
         
@@ -178,7 +189,7 @@ int main() {
     int n, m;
     cin >> n >> m;
     
-    ExactMaxFlowSum solver(n);
+    UltraFastMaxFlow solver(n);
     for (int i = 0; i < m; i++) {
         int a, b;
         cin >> a >> b;
