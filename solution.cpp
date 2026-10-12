@@ -7,65 +7,105 @@ using namespace std;
 
 const int MAXN = 3005;
 
-class MaxFlowSolver {
+class FastMaxFlow {
 private:
     vector<int> adj[MAXN];
     vector<pair<int, int>> edges;
     int n;
     
-    // BFS to find if there's a path from s to t
-    bool bfs(int s, int t, vector<int>& parent) {
-        vector<bool> visited(n + 1, false);
-        queue<int> q;
-        q.push(s);
-        visited[s] = true;
-        parent[s] = -1;
+    // Use Union-Find for connectivity checks
+    class UnionFind {
+    private:
+        vector<int> parent, rank;
+    public:
+        UnionFind(int size) {
+            parent.resize(size + 1);
+            rank.resize(size + 1, 0);
+            for (int i = 0; i <= size; i++) parent[i] = i;
+        }
         
-        while (!q.empty()) {
-            int u = q.front();
-            q.pop();
+        int find(int x) {
+            if (parent[x] != x) parent[x] = find(parent[x]);
+            return parent[x];
+        }
+        
+        void unite(int x, int y) {
+            x = find(x);
+            y = find(y);
+            if (x == y) return;
+            if (rank[x] < rank[y]) swap(x, y);
+            parent[y] = x;
+            if (rank[x] == rank[y]) rank[x]++;
+        }
+        
+        bool connected(int x, int y) {
+            return find(x) == find(y);
+        }
+    };
+    
+    // Find edge-disjoint paths using BFS with edge removal
+    int find_disjoint_paths(int s, int t) {
+        if (s == t) return 0;
+        
+        int paths = 0;
+        vector<bool> edge_used(edges.size(), false);
+        
+        while (paths < 3) { // Max 3 paths due to degree constraint
+            vector<int> parent(n + 1, -1);
+            vector<int> edge_parent(n + 1, -1);
+            queue<int> q;
+            q.push(s);
+            parent[s] = s;
             
-            for (int v : adj[u]) {
-                if (!visited[v]) {
-                    visited[v] = true;
-                    parent[v] = u;
-                    q.push(v);
-                    if (v == t) return true;
+            bool found = false;
+            while (!q.empty() && !found) {
+                int u = q.front();
+                q.pop();
+                
+                for (int i = 0; i < (int)adj[u].size(); i++) {
+                    int v = adj[u][i];
+                    if (parent[v] == -1) {
+                        // Find edge index
+                        int edge_idx = -1;
+                        for (int j = 0; j < (int)edges.size(); j++) {
+                            if ((edges[j].first == u && edges[j].second == v) ||
+                                (edges[j].first == v && edges[j].second == u)) {
+                                edge_idx = j;
+                                break;
+                            }
+                        }
+                        
+                        if (edge_idx != -1 && !edge_used[edge_idx]) {
+                            parent[v] = u;
+                            edge_parent[v] = edge_idx;
+                            q.push(v);
+                            if (v == t) {
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
-        }
-        return false;
-    }
-    
-    // Find one augmenting path and remove its edges
-    int find_and_remove_path(int s, int t) {
-        vector<int> parent(n + 1);
-        if (!bfs(s, t, parent)) return 0;
-        
-        // Reconstruct path and remove edges
-        vector<int> path;
-        int current = t;
-        while (current != -1) {
-            path.push_back(current);
-            current = parent[current];
-        }
-        reverse(path.begin(), path.end());
-        
-        // Remove edges from the path
-        for (int i = 0; i < path.size() - 1; i++) {
-            int u = path[i], v = path[i + 1];
-            // Remove edge u-v from adjacency lists
-            auto it = find(adj[u].begin(), adj[u].end(), v);
-            if (it != adj[u].end()) adj[u].erase(it);
-            it = find(adj[v].begin(), adj[v].end(), u);
-            if (it != adj[v].end()) adj[v].erase(it);
+            
+            if (!found) break;
+            
+            // Mark edges in the path as used
+            int current = t;
+            while (current != s) {
+                int edge_idx = edge_parent[current];
+                edge_used[edge_idx] = true;
+                current = parent[current];
+            }
+            
+            paths++;
         }
         
-        return 1;
+        return paths;
     }
     
 public:
-    MaxFlowSolver(int nodes) : n(nodes) {}
+    FastMaxFlow(int nodes) : n(nodes) {}
     
     void add_edge(int u, int v) {
         adj[u].push_back(v);
@@ -74,22 +114,14 @@ public:
     }
     
     int max_flow(int s, int t) {
-        // Restore original graph
-        for (int i = 1; i <= n; i++) {
-            adj[i].clear();
-        }
+        // Quick connectivity check
+        UnionFind uf(n);
         for (auto& edge : edges) {
-            adj[edge.first].push_back(edge.second);
-            adj[edge.second].push_back(edge.first);
+            uf.unite(edge.first, edge.second);
         }
+        if (!uf.connected(s, t)) return 0;
         
-        int flow = 0;
-        while (true) {
-            int path_flow = find_and_remove_path(s, t);
-            if (path_flow == 0) break;
-            flow += path_flow;
-        }
-        return flow;
+        return find_disjoint_paths(s, t);
     }
 };
 
@@ -100,7 +132,7 @@ int main() {
     int n, m;
     cin >> n >> m;
     
-    MaxFlowSolver solver(n);
+    FastMaxFlow solver(n);
     for (int i = 0; i < m; i++) {
         int a, b;
         cin >> a >> b;
