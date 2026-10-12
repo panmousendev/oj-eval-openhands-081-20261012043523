@@ -3,56 +3,57 @@
 #include <queue>
 #include <algorithm>
 #include <cstring>
+#include <map>
 using namespace std;
 
 const int MAXN = 3005;
 
-class FastMaxFlow {
+class OptimizedMaxFlow {
 private:
     vector<int> adj[MAXN];
     vector<pair<int, int>> edges;
     int n;
+    map<pair<int, int>, int> edge_to_idx; // Map edge pairs to indices
     
-    // Use Union-Find for connectivity checks
-    class UnionFind {
-    private:
-        vector<int> parent, rank;
-    public:
-        UnionFind(int size) {
-            parent.resize(size + 1);
-            rank.resize(size + 1, 0);
-            for (int i = 0; i <= size; i++) parent[i] = i;
-        }
+    // Precompute all-pairs shortest paths for connectivity
+    vector<vector<int>> precompute_distances() {
+        vector<vector<int>> dist(n + 1, vector<int>(n + 1, -1));
         
-        int find(int x) {
-            if (parent[x] != x) parent[x] = find(parent[x]);
-            return parent[x];
+        for (int i = 1; i <= n; i++) {
+            queue<int> q;
+            q.push(i);
+            dist[i][i] = 0;
+            
+            while (!q.empty()) {
+                int u = q.front();
+                q.pop();
+                
+                for (int v : adj[u]) {
+                    if (dist[i][v] == -1) {
+                        dist[i][v] = dist[i][u] + 1;
+                        q.push(v);
+                    }
+                }
+            }
         }
-        
-        void unite(int x, int y) {
-            x = find(x);
-            y = find(y);
-            if (x == y) return;
-            if (rank[x] < rank[y]) swap(x, y);
-            parent[y] = x;
-            if (rank[x] == rank[y]) rank[x]++;
-        }
-        
-        bool connected(int x, int y) {
-            return find(x) == find(y);
-        }
-    };
+        return dist;
+    }
     
-    // Find edge-disjoint paths using BFS with edge removal
-    int find_disjoint_paths(int s, int t) {
-        if (s == t) return 0;
+    // Count edge-disjoint paths
+    int count_disjoint_paths(int s, int t, const vector<vector<int>>& dist) {
+        if (s == t || dist[s][t] == -1) return 0;
         
-        int paths = 0;
+        // Max flow is bounded by min(degree[s], degree[t])
+        int max_possible = min(adj[s].size(), adj[t].size());
+        if (max_possible == 0) return 0;
+        if (max_possible > 3) max_possible = 3; // Due to degree constraint
+        
         vector<bool> edge_used(edges.size(), false);
+        int paths = 0;
         
-        while (paths < 3) { // Max 3 paths due to degree constraint
+        for (int attempt = 0; attempt < max_possible; attempt++) {
             vector<int> parent(n + 1, -1);
-            vector<int> edge_parent(n + 1, -1);
+            vector<int> edge_idx_used(n + 1, -1);
             queue<int> q;
             q.push(s);
             parent[s] = s;
@@ -62,22 +63,18 @@ private:
                 int u = q.front();
                 q.pop();
                 
-                for (int i = 0; i < (int)adj[u].size(); i++) {
-                    int v = adj[u][i];
+                for (int v : adj[u]) {
                     if (parent[v] == -1) {
-                        // Find edge index
+                        // Find edge index using map
                         int edge_idx = -1;
-                        for (int j = 0; j < (int)edges.size(); j++) {
-                            if ((edges[j].first == u && edges[j].second == v) ||
-                                (edges[j].first == v && edges[j].second == u)) {
-                                edge_idx = j;
-                                break;
-                            }
+                        auto it = edge_to_idx.find({min(u, v), max(u, v)});
+                        if (it != edge_to_idx.end()) {
+                            edge_idx = it->second;
                         }
                         
                         if (edge_idx != -1 && !edge_used[edge_idx]) {
                             parent[v] = u;
-                            edge_parent[v] = edge_idx;
+                            edge_idx_used[v] = edge_idx;
                             q.push(v);
                             if (v == t) {
                                 found = true;
@@ -90,10 +87,10 @@ private:
             
             if (!found) break;
             
-            // Mark edges in the path as used
+            // Mark edges in this path as used
             int current = t;
             while (current != s) {
-                int edge_idx = edge_parent[current];
+                int edge_idx = edge_idx_used[current];
                 edge_used[edge_idx] = true;
                 current = parent[current];
             }
@@ -105,23 +102,31 @@ private:
     }
     
 public:
-    FastMaxFlow(int nodes) : n(nodes) {}
+    OptimizedMaxFlow(int nodes) : n(nodes) {}
     
     void add_edge(int u, int v) {
         adj[u].push_back(v);
         adj[v].push_back(u);
+        int idx = edges.size();
         edges.push_back({u, v});
+        edge_to_idx[{min(u, v), max(u, v)}] = idx;
     }
     
-    int max_flow(int s, int t) {
-        // Quick connectivity check
-        UnionFind uf(n);
-        for (auto& edge : edges) {
-            uf.unite(edge.first, edge.second);
-        }
-        if (!uf.connected(s, t)) return 0;
+    long long solve() {
+        // Precompute distances once
+        auto dist = precompute_distances();
         
-        return find_disjoint_paths(s, t);
+        long long total = 0;
+        
+        // For each pair (a, b) where a < b, calculate max flow
+        for (int a = 1; a <= n; a++) {
+            for (int b = a + 1; b <= n; b++) {
+                int flow = count_disjoint_paths(a, b, dist);
+                total += flow;
+            }
+        }
+        
+        return total;
     }
 };
 
@@ -132,23 +137,13 @@ int main() {
     int n, m;
     cin >> n >> m;
     
-    FastMaxFlow solver(n);
+    OptimizedMaxFlow solver(n);
     for (int i = 0; i < m; i++) {
         int a, b;
         cin >> a >> b;
         solver.add_edge(a, b);
     }
     
-    long long total = 0;
-    
-    // For each pair (a, b) where a < b, calculate max flow
-    for (int a = 1; a <= n; a++) {
-        for (int b = a + 1; b <= n; b++) {
-            int flow = solver.max_flow(a, b);
-            total += flow;
-        }
-    }
-    
-    cout << total << endl;
+    cout << solver.solve() << endl;
     return 0;
 }
